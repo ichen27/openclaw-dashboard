@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  color     String   @default("#6366f1")
+  icon      String   @default("folder")
+  createdAt DateTime @default(now())
+  tasks     Task[]
+
+  @@index([slug])
+}
+
+model Task {
+  id            String    @id @default(cuid())
+  categoryId    String
+  title         String
+  description   String    @default("")
+  requirements  String    @default("")
+  status        String    @default("backlog")
+  priority      String    @default("medium")
+  assignedAgent String?
+  dueDate       DateTime?
+  order         Int       @default(0)
+  archived      Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  category     Category         @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  events       TaskEvent[]
+  comments     Comment[]
+  blockedBy    TaskDependency[] @relation("BlockedTask")
+  blocking     TaskDependency[] @relation("BlockingTask")
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([archived])
+}
+
+model TaskEvent {
+  id         String   @id @default(cuid())
+  taskId     String
+  fromStatus String?
+  toStatus   String
+  agent      String?
+  note       String   @default("")
+  createdAt  DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([createdAt])
+  @@index([toStatus])
+  @@index([agent])
+}
+
+model TaskDependency {
+  id            String   @id @default(cuid())
+  taskId        String   // the task that is blocked
+  blockedById   String   // the task that is blocking it
+  createdAt     DateTime @default(now())
+
+  task      Task @relation("BlockedTask",    fields: [taskId],      references: [id], onDelete: Cascade)
+  blockedBy Task @relation("BlockingTask",   fields: [blockedById], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, blockedById])
+  @@index([taskId])
+  @@index([blockedById])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  taskId    String
+  author    String   @default("human")
+  content   String
+  mentions  String   @default("[]") // JSON array of mentioned agent ids
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([createdAt])
+  @@index([author])
+}
+
+// Daily goals (3 per day, reset each day)
+model DailyGoal {
+  id        String   @id @default(cuid())
+  date      String   // YYYY-MM-DD
+  text      String
+  done      Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+// Quick notes / scratchpad
+model Note {
+  id        String   @id @default(cuid())
+  title     String   @default("Untitled")
+  content   String   @default("")
+  tags      String   @default("[]")  // JSON array of tag strings
+  pinned    Boolean  @default(false)
+  color     String   @default("default") // default | blue | green | amber | red | violet
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pinned])
+  @@index([updatedAt])
+}
+
+// LinkedIn outreach / referral tracker
+model Outreach {
+  id          String   @id @default(cuid())
+  company     String
+  contactName String
+  contactRole String   @default("")        // e.g. "SWE at Two Sigma"
+  linkedinUrl String   @default("")
+  status      String   @default("pending") // pending | replied | call_scheduled | referred | no_response | declined
+  notes       String   @default("")
+  sentAt      DateTime @default(now())
+  repliedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([company])
+  @@index([status])
+}
+
+// Study flashcards for interview prep
+model Flashcard {
+  id         String   @id @default(cuid())
+  question   String
+  answer     String
+  category   String   @default("algorithm") // algorithm | probability | system_design | behavioral | other
+  difficulty String   @default("medium")    // easy | medium | hard
+  tags       String   @default("[]")        // JSON
+  reviewed   Int      @default(0)            // times reviewed
+  correct    Int      @default(0)            // times answered correctly
+  lastSeen   DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([category])
+  @@index([difficulty])
+}
+
+// LeetCode / interview problem tracker
+model LCProblem {
+  id         String   @id @default(cuid())
+  number     Int?                         // e.g. 1, 42, 200
+  title      String
+  url        String   @default("")
+  difficulty String   @default("medium")  // easy | medium | hard
+  category   String   @default("arrays")  // arrays | two_pointers | sliding_window | binary_search | linked_list | trees | graphs | dp | stack | heap | intervals | greedy | math | probability | other
+  status     String   @default("solved")  // solved | attempted | review
+  notes      String   @default("")
+  timeMin    Int?                          // time to solve in minutes
+  solvedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([category])
+  @@index([difficulty])
+  @@index([status])
+  @@index([solvedAt])
+}
+
+// Internship application pipeline tracker
+model Application {
+  id          String    @id @default(cuid())
+  company     String
+  role        String
+  url         String    @default("")
+  stage       String    @default("not_applied") // not_applied | applied | phone_screen | technical | final_round | offer | rejected | withdrawn
+  priority    String    @default("high")        // high | medium | low
+  notes       String    @default("")
+  taskId        String?   // optional link to a dashboard task
+  appliedAt     DateTime?
+  interviewDate DateTime? // next scheduled interview
+  offerDeadline DateTime? // deadline to respond to offer
+  nextAction    String    @default("")           // e.g. "Follow up by March 1"
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([stage])
+  @@index([company])
+}
+
+model FeedPost {
+  id        String   @id @default(cuid())
+  author    String   // "ivan", "main", "agent-4", etc.
+  content   String
+  type      String   @default("post") // "post", "request", "status", "comment"
+  mentions  String   @default("[]")   // JSON array of mentioned agent/user ids
+  pinned    Boolean  @default(false)
+  parentId  String?  // for replies/threads
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([author])
+  @@index([parentId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  agent     String   // target agent id
+  role      String   // "user" or "assistant"
+  content   String
+  sender    String   @default("ivan") // who sent: "ivan", "dashboard", agent id
+  timestamp DateTime @default(now())
+
+  @@index([agent])
+  @@index([timestamp])
+}
+
+model PingSchedule {
+  id        String    @id @default(cuid())
+  target    String    // agent id or "all"
+  message   String
+  cronExpr  String    // e.g. "0 */2 * * *" for every 2 hours
+  enabled   Boolean   @default(true)
+  lastRunAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([enabled])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  date      String   // YYYY-MM-DD
+  goals     String   @default("[]")
+  tasks     String   @default("[]")
+  notes     String   @default("")
+  mood      String   @default("neutral")
+  pnl       Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([date])
+  @@index([date])
+}
