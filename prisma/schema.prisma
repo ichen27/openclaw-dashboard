@@ -255,3 +255,15 @@ model JournalEntry {
   @@unique([date])
   @@index([date])
 }
+
+model ActionItem {
+  id        String   @id @default(cuid())
+  text      String
+  done      Boolean  @default(false)
+  source    String   @default("manual")  // manual, agent-review, system
+  sourceRef String?  // optional link to task id or other reference
+  priority  String   @default("medium")  // low, medium, high
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

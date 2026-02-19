@@ -13,6 +13,7 @@ import { PomodoroTimer } from '@/components/pomodoro-timer';
 import { MissionControl } from '@/components/mission-control';
 import { DailyGoals } from '@/components/daily-goals';
 import { MorningBrief } from '@/components/morning-brief';
+import { ActionItems } from '@/components/action-items';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -392,6 +393,9 @@ export default function TodayPage() {
         <div className="space-y-4">
           {/* Morning Brief */}
           <MorningBrief />
+
+          {/* Action Items */}
+          <ActionItems />
 
           {/* Daily Goals */}
           <DailyGoals />
