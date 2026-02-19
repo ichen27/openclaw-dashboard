@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { ListTodo, Bot, BarChart3, Brain, Sun, Briefcase, Code2, StickyNote, CalendarDays, MessageCircle, Monitor, BookOpen } from 'lucide-react';
+import { ListTodo, Bot, BarChart3, Brain, Sun, Briefcase, Code2, StickyNote, CalendarDays, MessageCircle, Monitor } from 'lucide-react';
 
 const tabs = [
   { href: '/today', label: 'Today', icon: Sun },
@@ -11,7 +11,6 @@ const tabs = [
   { href: '/apply', label: 'Apply', icon: Briefcase },
   { href: '/calendar', label: 'Calendar', icon: CalendarDays },
   { href: '/lc', label: 'LC', icon: Code2 },
-  { href: '/journal', label: 'Journal', icon: BookOpen },
   { href: '/notes', label: 'Notes', icon: StickyNote },
   { href: '/feed', label: 'Feed', icon: MessageCircle },
   { href: '/chat', label: 'Chat', icon: Monitor },

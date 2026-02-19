@@ -57,6 +57,17 @@ The OpenClaw Dashboard is a Next.js 16 web app for managing tasks and monitoring
 | DELETE | `/api/tasks/[id]` | Delete task |
 | POST | `/api/tasks/bulk` | Bulk create tasks (body: `{ tasks: [...] }`, max 100) |
 
+### Categories
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/categories` | List all categories ordered by `order` asc (includes task count) |
+| POST | `/api/categories` | Create category (`name`, `slug?`, `color?`, `icon?`, `order?`) — auto-generates slug from name if omitted |
+| GET | `/api/categories/[id]` | Get single category (includes task count) |
+| PATCH | `/api/categories/[id]` | Update category fields (`name`, `slug`, `color`, `icon`, `order`) |
+| DELETE | `/api/categories/[id]` | Delete category (cascades to tasks) |
+| PUT | `/api/categories/reorder` | Reorder categories (`{ orderedIds: [...] }`) |
+
 ### Agents
 
 | Method | Endpoint | Description |
@@ -83,8 +94,6 @@ The OpenClaw Dashboard is a Next.js 16 web app for managing tasks and monitoring
 | GET | `/api/tools/active` | List running processes/tools |
 | GET | `/api/today` | Daily focus: work queue, in-progress, recently done, category stats |
 | GET | `/api/tasks/export?format=csv\|json` | Export all tasks (optional: `?status=X&category=slug`) |
-| GET | `/api/tasks/auction?limit=N` | Ranked backlog tasks with per-agent bid scores |
-| POST | `/api/tasks/auction` | Assign agent to task: `{ taskId, agentId }` → sets in-progress |
 | PATCH | `/api/tasks/bulk` | Bulk update: `{ ids: [...], status?, priority?, assignedAgent? }` |
 | GET | `/api/tasks/[id]/comments` | List comments for a task |
 | POST | `/api/tasks/[id]/comments` | Create comment `{ content, author }` — auto-detects @mentions |

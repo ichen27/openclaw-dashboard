@@ -29,7 +29,7 @@ import {
   STATUS_COLORS,
   type Status,
 } from "@/lib/constants";
-import { updateTaskStatus, reorderTask, archiveDoneTasks } from "@/lib/actions";
+import { updateTaskStatus, reorderTask, archiveDoneTasks, archiveTask } from "@/lib/actions";
 
 type TaskWithCategory = {
   id: string;
@@ -161,6 +161,28 @@ function DroppableColumn({
   );
 }
 
+function ArchiveDropZone({ isDragging }: { isDragging: boolean }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "archive" });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-all duration-200 ${
+        isDragging
+          ? isOver
+            ? "h-14 opacity-100 border-red-400 bg-red-500/10 text-red-400"
+            : "h-14 opacity-100 border-muted-foreground/30 bg-muted/20 text-muted-foreground"
+          : "h-0 opacity-0 border-transparent overflow-hidden"
+      }`}
+    >
+      <Archive className={`h-4 w-4 transition-transform ${isOver ? "scale-110" : ""}`} />
+      <span className="text-sm font-medium">
+        {isOver ? "Release to archive" : "Drop here to archive"}
+      </span>
+    </div>
+  );
+}
+
 export function KanbanBoard({ tasks: initialTasks }: { tasks: TaskWithCategory[] }) {
   const [tasks, setTasks] = useState<TaskWithCategory[]>(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -263,6 +285,13 @@ export function KanbanBoard({ tasks: initialTasks }: { tasks: TaskWithCategory[]
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
 
+    // Archive drop
+    if (over.id === "archive") {
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      await archiveTask(taskId);
+      return;
+    }
+
     // Determine target status
     let targetStatus: string | null = null;
     if (STATUSES.includes(over.id as Status)) {
@@ -308,7 +337,9 @@ export function KanbanBoard({ tasks: initialTasks }: { tasks: TaskWithCategory[]
       return;
     }
     const overId = event.over.id as string;
-    if (STATUSES.includes(overId as Status)) {
+    if (overId === "archive") {
+      setOverColumn("archive");
+    } else if (STATUSES.includes(overId as Status)) {
       setOverColumn(overId);
     } else {
       const overTask = tasks.find((t) => t.id === overId);
@@ -345,6 +376,7 @@ export function KanbanBoard({ tasks: initialTasks }: { tasks: TaskWithCategory[]
           />
         ))}
       </div>
+      <ArchiveDropZone isDragging={activeId !== null} />
       <DragOverlay>
         {activeTask ? (
           <div className="w-72 opacity-90 rotate-2">

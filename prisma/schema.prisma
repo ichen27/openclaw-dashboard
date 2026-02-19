@@ -13,6 +13,7 @@ model Category {
   slug      String   @unique
   color     String   @default("#6366f1")
   icon      String   @default("folder")
+  order     Int      @default(0)
   createdAt DateTime @default(now())
   tasks     Task[]
 

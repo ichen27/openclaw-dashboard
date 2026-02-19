@@ -1,43 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync } from "fs";
 import { prisma } from "@/lib/prisma";
 
-// Agent config paths
-const AGENT_CONFIGS = [
-  { id: "agent-1", configPath: "/Users/chenagent/.openclaw/openclaw.json" },
-  { id: "agent-2", configPath: "/Users/chenagent/.openclaw-agent-2/openclaw.json" },
-  { id: "agent-3", configPath: "/Users/chenagent/.openclaw-agent-3/openclaw.json" },
-  { id: "agent-4", configPath: "/Users/chenagent/.openclaw-agent-4/openclaw.json" },
-];
-
-function loadGateways() {
-  return AGENT_CONFIGS.map((agent) => {
-    try {
-      const config = JSON.parse(readFileSync(agent.configPath, "utf-8"));
-      return {
-        id: agent.id,
-        port: config?.gateway?.port ?? 0,
-        token: config?.gateway?.auth?.token ?? "",
-      };
-    } catch {
-      return { id: agent.id, port: 0, token: "" };
-    }
-  }).filter((g) => g.port > 0 && g.token);
-}
-
-let gatewayCache: ReturnType<typeof loadGateways> | null = null;
-let cacheTime = 0;
-
-function getGateways() {
-  const now = Date.now();
-  if (!gatewayCache || now - cacheTime > 30000) {
-    gatewayCache = loadGateways();
-    cacheTime = now;
-  }
-  return gatewayCache;
-}
-
-type Gateway = { id: string; port: number; token: string };
+const GATEWAY_URL = "http://localhost:18789";
+const GATEWAY_TOKEN = "fdba56046afae2ade86581c3af6c68754afb9b36b8e784cc";
+const AGENTS = ["agent-1", "agent-2", "agent-3", "agent-4"];
 
 interface ChatMsg {
   id: string;
@@ -46,7 +12,7 @@ interface ChatMsg {
   content: string;
   timestamp: number;
   model?: string;
-  source?: "gateway" | "local";
+  source?: "gateway" | "dashboard" | "inter-agent";
 }
 
 function extractText(
@@ -62,43 +28,44 @@ function extractText(
   return "";
 }
 
+function isInterAgentContent(text: string): boolean {
+  return (
+    text.includes("[Inter-session message]") ||
+    text.includes("sourceSession")
+  );
+}
+
 async function fetchAgentHistory(
-  gateway: Gateway,
+  agentId: string,
   limit: number
 ): Promise<ChatMsg[]> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(`http://127.0.0.1:${gateway.port}/tools/invoke`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${gateway.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        tool: "sessions_history",
-        args: { sessionKey: "agent:main:main", limit, includeTools: false },
-      }),
-      signal: controller.signal,
-    });
+    const res = await fetch(
+      `${GATEWAY_URL}/sessions/agent:${agentId}:main/history?limit=${limit}`,
+      {
+        headers: { Authorization: `Bearer ${GATEWAY_TOKEN}` },
+        signal: controller.signal,
+      }
+    );
     clearTimeout(timeout);
 
     if (!res.ok) return [];
     const data = await res.json();
-    if (!data.ok) return [];
 
-    const text = data.result?.content?.[0]?.text;
-    if (!text) return [];
-
-    let msgs = JSON.parse(text);
-    if (msgs && typeof msgs === "object" && "messages" in msgs)
-      msgs = msgs.messages;
+    let msgs = Array.isArray(data)
+      ? data
+      : data.messages ?? data.history ?? [];
     if (!Array.isArray(msgs)) return [];
 
     return msgs
       .filter(
-        (m: { role: string; content: string | Array<{ type: string; text?: string }> }) => {
+        (m: {
+          role: string;
+          content: string | Array<{ type: string; text?: string }>;
+        }) => {
           if (m.role !== "user" && m.role !== "assistant") return false;
           const txt = extractText(m.content);
           if (!txt.trim()) return false;
@@ -116,57 +83,95 @@ async function fetchAgentHistory(
             model?: string;
           },
           i: number
-        ) => ({
-          id: `gw-${gateway.id}-${m.timestamp || i}`,
-          agent: gateway.id,
-          role: m.role as "user" | "assistant",
-          content: extractText(m.content),
-          timestamp: m.timestamp || 0,
-          model: m.model,
-          source: "gateway" as const,
-        })
+        ) => {
+          const text = extractText(m.content);
+          const isInterAgent =
+            m.role === "user" && isInterAgentContent(text);
+          return {
+            id: `gw-${agentId}-${m.timestamp || Date.now() - i}`,
+            agent: agentId,
+            role: m.role as "user" | "assistant",
+            content: text,
+            timestamp: m.timestamp || 0,
+            model: m.model,
+            source: isInterAgent
+              ? ("inter-agent" as const)
+              : ("gateway" as const),
+          };
+        }
       );
   } catch {
     return [];
   }
 }
 
-async function fetchAgentStatus(gateway: Gateway) {
+async function fetchAgentStatuses(): Promise<
+  Array<{ id: string; online: boolean; model?: string }>
+> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
 
-    const res = await fetch(`http://127.0.0.1:${gateway.port}/tools/invoke`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${gateway.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        tool: "sessions_list",
-        args: { limit: 1, messageLimit: 0 },
-      }),
+    const res = await fetch(`${GATEWAY_URL}/sessions`, {
+      headers: { Authorization: `Bearer ${GATEWAY_TOKEN}` },
       signal: controller.signal,
     });
     clearTimeout(timeout);
 
-    if (!res.ok) return { online: false };
+    if (!res.ok) {
+      return AGENTS.map((id) => ({ id, online: false }));
+    }
+
     const data = await res.json();
-    if (!data.ok) return { online: false };
+    const sessions: Array<{ session_id?: string; status?: string }> =
+      Array.isArray(data) ? data : data.sessions ?? [];
 
-    const sessions = data.result?.details?.sessions;
-    if (!sessions?.length) return { online: true };
-
-    const s = sessions[0];
-    return {
-      online: true,
-      model: s.model as string | undefined,
-      channel: s.channel as string | undefined,
-      tokens: s.totalTokens as number | undefined,
-    };
+    return AGENTS.map((id) => {
+      const sessionKey = `agent:${id}:main`;
+      const session = sessions.find(
+        (s) => s.session_id === sessionKey || s.session_id === id
+      );
+      return {
+        id,
+        online: !!session && session.status !== "disconnected",
+      };
+    });
   } catch {
-    return { online: false };
+    return AGENTS.map((id) => ({ id, online: false }));
   }
+}
+
+// Mark inter-agent user messages that weren't sent from the dashboard
+async function markInterAgentMessages(
+  gatewayMsgs: ChatMsg[],
+  agentId?: string
+): Promise<ChatMsg[]> {
+  const userMsgs = gatewayMsgs.filter(
+    (m) => m.role === "user" && m.source !== "inter-agent"
+  );
+  if (userMsgs.length === 0) return gatewayMsgs;
+
+  const where: Record<string, unknown> = { role: "user" };
+  if (agentId) where.agent = agentId;
+
+  const localMsgs = await prisma.chatMessage.findMany({
+    where,
+    select: { agent: true, content: true, timestamp: true },
+  });
+
+  return gatewayMsgs.map((msg) => {
+    if (msg.role !== "user" || msg.source === "inter-agent") return msg;
+    const isLocal = localMsgs.some(
+      (lm) =>
+        lm.agent === msg.agent &&
+        lm.content === msg.content &&
+        Math.abs(lm.timestamp.getTime() - msg.timestamp) < 60000
+    );
+    return {
+      ...msg,
+      source: isLocal ? ("dashboard" as const) : ("inter-agent" as const),
+    };
+  });
 }
 
 // GET /api/chat
@@ -177,31 +182,23 @@ export async function GET(req: NextRequest) {
     100
   );
   const statusOnly = req.nextUrl.searchParams.get("status") === "true";
-  const GATEWAYS = getGateways();
 
   if (statusOnly) {
-    // Also include offline agents from config
-    const allAgentIds = AGENT_CONFIGS.map((a) => a.id);
-    const statuses = await Promise.all(
-      allAgentIds.map(async (id) => {
-        const gw = GATEWAYS.find((g) => g.id === id);
-        if (!gw) return { id, online: false };
-        return { id, ...(await fetchAgentStatus(gw)) };
-      })
-    );
+    const statuses = await fetchAgentStatuses();
     return NextResponse.json({ agents: statuses });
   }
 
-  // Fetch from gateways
-  const gateways = agentFilter
-    ? GATEWAYS.filter((g) => g.id === agentFilter)
-    : GATEWAYS;
+  const agentIds = agentFilter ? [agentFilter] : AGENTS;
 
   const gatewayMsgs = (
-    await Promise.all(gateways.map((gw) => fetchAgentHistory(gw, limit)))
+    await Promise.all(agentIds.map((id) => fetchAgentHistory(id, limit)))
   ).flat();
 
-  // Fetch locally stored messages (sent from dashboard)
+  const annotatedMsgs = await markInterAgentMessages(
+    gatewayMsgs,
+    agentFilter ?? undefined
+  );
+
   const where: Record<string, unknown> = {};
   if (agentFilter) where.agent = agentFilter;
 
@@ -217,23 +214,20 @@ export async function GET(req: NextRequest) {
     role: m.role as "user" | "assistant",
     content: m.content,
     timestamp: m.timestamp.getTime(),
-    source: "local" as const,
+    source: "dashboard" as const,
   }));
 
-  // Merge and deduplicate (prefer gateway messages, supplement with local)
-  const allMsgs = [...gatewayMsgs, ...localFormatted];
-
-  // Deduplicate: if a local message content matches a gateway message within 30s, skip local
-  const deduplicated = allMsgs.filter((msg, _idx) => {
-    if (msg.source !== "local") return true;
-    // Check if gateway has a similar message
-    const hasDupe = gatewayMsgs.some(
-      (gw) =>
-        gw.agent === msg.agent &&
-        gw.content === msg.content &&
-        Math.abs(gw.timestamp - msg.timestamp) < 30000
-    );
-    return !hasDupe;
+  const allMsgs = [...annotatedMsgs, ...localFormatted];
+  const deduplicated = allMsgs.filter((msg) => {
+    if (msg.id.startsWith("local-")) {
+      return !annotatedMsgs.some(
+        (gw) =>
+          gw.agent === msg.agent &&
+          gw.content === msg.content &&
+          Math.abs(gw.timestamp - msg.timestamp) < 60000
+      );
+    }
+    return true;
   });
 
   deduplicated.sort((a, b) => a.timestamp - b.timestamp);
@@ -241,7 +235,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ messages: deduplicated });
 }
 
-// POST /api/chat — send message + store locally
+// POST /api/chat — send message via gateway REST + store locally
 export async function POST(req: NextRequest) {
   const { agent, message } = await req.json();
 
@@ -252,12 +246,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const gw = getGateways().find((g) => g.id === agent);
-  if (!gw) {
-    return NextResponse.json({ error: "Agent offline or unknown" }, { status: 404 });
-  }
-
-  // Store in local DB first so it shows up immediately
   const stored = await prisma.chatMessage.create({
     data: {
       agent,
@@ -268,61 +256,40 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Send via gateway
   try {
-    const res = await fetch(`http://127.0.0.1:${gw.port}/tools/invoke`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${gw.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        tool: "cron",
-        args: { action: "wake", text: message, mode: "now" },
-      }),
-    });
-
-    if (!res.ok) {
-      // Fallback: one-shot cron
-      await fetch(`http://127.0.0.1:${gw.port}/tools/invoke`, {
+    const res = await fetch(
+      `${GATEWAY_URL}/sessions/agent:${agent}:main/send`,
+      {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${gw.token}`,
+          Authorization: `Bearer ${GATEWAY_TOKEN}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          tool: "cron",
-          args: {
-            action: "add",
-            job: {
-              name: `dashboard-msg-${Date.now()}`,
-              schedule: {
-                kind: "at",
-                at: new Date(Date.now() + 3000).toISOString(),
-              },
-              payload: { kind: "systemEvent", text: message },
-              sessionTarget: "main",
-            },
-          },
-        }),
-      });
-      return NextResponse.json({
-        sent: true,
-        method: "cron-fallback",
-        messageId: stored.id,
-      });
+        body: JSON.stringify({ message }),
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "unknown error");
+      return NextResponse.json(
+        {
+          error: "Gateway rejected message",
+          messageId: stored.id,
+          detail: errText,
+        },
+        { status: 502 }
+      );
     }
 
-    const data = await res.json();
-    return NextResponse.json({
-      sent: true,
-      method: "wake",
-      messageId: stored.id,
-      data,
-    });
+    const data = await res.json().catch(() => ({}));
+    return NextResponse.json({ sent: true, messageId: stored.id, data });
   } catch (err) {
     return NextResponse.json(
-      { error: "Failed to send to gateway", messageId: stored.id, detail: String(err) },
+      {
+        error: "Failed to send to gateway",
+        messageId: stored.id,
+        detail: String(err),
+      },
       { status: 500 }
     );
   }

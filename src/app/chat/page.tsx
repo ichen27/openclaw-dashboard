@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   MessageCircle, Send, RefreshCw, Loader2, ChevronDown,
-  Circle, Wifi, WifiOff, Bot, User, Monitor, Zap,
+  Circle, Wifi, WifiOff, Bot, User, Monitor, Zap, ArrowLeftRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +14,7 @@ interface ChatMessage {
   content: string;
   timestamp: number;
   model?: string;
+  source?: 'gateway' | 'dashboard' | 'inter-agent';
 }
 
 interface AgentStatus {
@@ -104,15 +105,16 @@ function ChatBubble({ msg, showAgent, showTimestamp, messages, index }: {
   index: number;
 }) {
   const isUser = msg.role === 'user';
+  const isInterAgent = msg.source === 'inter-agent';
   const style = getAgentStyle(msg.agent);
-  
+
   // Filter out system/heartbeat noise from display
   const content = msg.content
     .replace(/^Read HEARTBEAT\.md.*$/m, '')
     .replace(/^Current time:.*$/m, '')
     .replace(/^System: \[\d{4}-\d{2}-\d{2}.*?\] Compacted.*$/m, '')
     .trim();
-  
+
   if (!content) return null;
 
   return (
@@ -124,19 +126,32 @@ function ChatBubble({ msg, showAgent, showTimestamp, messages, index }: {
           </span>
         </div>
       )}
-      <div className={cn('flex gap-2.5 max-w-[85%]', isUser ? 'ml-auto flex-row-reverse' : '')}>
+      <div className={cn('flex gap-2.5 max-w-[85%]', isUser && !isInterAgent ? 'ml-auto flex-row-reverse' : '')}>
         {/* Avatar */}
         {showAgent && !isUser ? (
           <div className={cn('h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-1', style.bg)}>
             {style.initials}
+          </div>
+        ) : isInterAgent ? (
+          <div className="h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-1 bg-violet-500/20 ring-2 ring-violet-500/30">
+            <ArrowLeftRight className="h-3.5 w-3.5 text-violet-400" />
           </div>
         ) : !isUser ? (
           <div className="w-7 shrink-0" />
         ) : null}
 
         <div className="space-y-0.5">
-          {/* Agent label */}
-          {showAgent && !isUser && (
+          {/* Agent label / inter-agent badge */}
+          {isInterAgent && (
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <span className="text-[10px] font-semibold text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <ArrowLeftRight className="h-2.5 w-2.5" />
+                Inter-agent
+              </span>
+              <span className="text-[10px] text-muted-foreground/40">to {style.label}</span>
+            </div>
+          )}
+          {showAgent && !isUser && !isInterAgent && (
             <div className="flex items-center gap-2 mb-0.5">
               <span className={cn('text-xs font-semibold', style.color)}>{style.label}</span>
               {msg.model && <span className="text-[10px] text-muted-foreground/40">{msg.model}</span>}
@@ -146,14 +161,16 @@ function ChatBubble({ msg, showAgent, showTimestamp, messages, index }: {
           {/* Bubble */}
           <div className={cn(
             'rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words',
-            isUser
-              ? 'bg-primary text-primary-foreground rounded-br-md'
-              : 'bg-muted/60 text-foreground rounded-bl-md',
+            isInterAgent
+              ? 'bg-violet-500/10 text-foreground rounded-bl-md border border-violet-500/20'
+              : isUser
+                ? 'bg-primary text-primary-foreground rounded-br-md'
+                : 'bg-muted/60 text-foreground rounded-bl-md',
           )}>
             {content}
           </div>
 
-          {/* Timestamp on hover */}
+          {/* Timestamp */}
           <div className="text-[10px] text-muted-foreground/30 px-1">
             {formatTime(msg.timestamp)}
           </div>

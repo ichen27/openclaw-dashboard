@@ -29,7 +29,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Apply', href: '/apply', icon: Briefcase, description: 'Internship application pipeline' },
   { label: 'LC', href: '/lc', icon: Code2, description: 'LeetCode problem tracker' },
   { label: 'Notes', href: '/notes', icon: StickyNote, description: 'Scratchpad & research notes' },
-  { label: 'Agents', href: '/agents', icon: Bot, description: 'Agent monitoring & task auction' },
+  { label: 'Agents', href: '/agents', icon: Bot, description: 'Agent monitoring & collaboration' },
   { label: 'Analytics', href: '/analytics', icon: BarChart3, description: 'Velocity & activity charts' },
   { label: 'Knowledge', href: '/knowledge', icon: Brain, description: 'Search & connection map' },
 ];

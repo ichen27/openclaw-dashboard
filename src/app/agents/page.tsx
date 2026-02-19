@@ -8,9 +8,6 @@ import { ActivityTimeline } from './components/ActivityTimeline';
 import { CollaborationGraph } from './components/CollaborationGraph';
 import { MetricsPanel } from './components/MetricsPanel';
 import { ActiveTools } from './components/ActiveTools';
-import { TaskAuction } from './components/TaskAuction';
-import { AgentPing } from '@/components/agent-ping';
-import { PingScheduler } from '@/components/ping-scheduler';
 import { Loader2 } from 'lucide-react';
 
 // Map workspace paths to instance names
@@ -134,11 +131,8 @@ export default function AgentsPage() {
           )}
         </div>
 
-        {/* Right: Ping + Task Auction + Activity timeline + Active tools */}
+        {/* Right: Activity timeline + Active tools */}
         <div className="lg:col-span-1 space-y-4">
-          <AgentPing agents={agents} />
-          <PingScheduler agents={agents} />
-          <TaskAuction />
           <ActivityTimeline />
           <ActiveTools />
         </div>

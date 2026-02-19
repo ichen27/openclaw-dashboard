@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useEffect, useCallback } from "react";
+import { useMemo, useRef, useState, useEffect, useCallback, type DragEvent } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { KanbanBoard } from "@/components/kanban-board";
 import { NewTaskDialog } from "@/components/new-task-dialog";
@@ -19,6 +19,7 @@ type SerializedCategory = {
   slug: string;
   color: string;
   icon: string;
+  order: number;
   createdAt: string;
   tasks: SerializedTask[];
 };
@@ -121,10 +122,16 @@ export function DashboardClient({
 }: {
   categories: SerializedCategory[];
 }) {
+  const [orderedCategories, setOrderedCategories] = useState(categories);
   const allTasks = useMemo(
-    () => deserializeTasks(categories.flatMap((c) => c.tasks)),
-    [categories]
+    () => deserializeTasks(orderedCategories.flatMap((c) => c.tasks)),
+    [orderedCategories]
   );
+
+  // Sync if server data changes (e.g. after revalidation)
+  useEffect(() => {
+    setOrderedCategories(categories);
+  }, [categories]);
 
   const { filters, setFilters, filtered, assignees, hasActiveFilters, clearFilters } =
     useTaskFilters(allTasks);
@@ -133,8 +140,82 @@ export function DashboardClient({
   const [newTaskCategoryId, setNewTaskCategoryId] = useState<string | null>(null);
   const [showDecompose, setShowDecompose] = useState(false);
 
+  // Drag-and-drop state for category tabs
+  const [draggedCatId, setDraggedCatId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [dropSide, setDropSide] = useState<"left" | "right" | null>(null);
+
+  const handleDragStart = useCallback((e: DragEvent<HTMLElement>, catId: string) => {
+    setDraggedCatId(catId);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", catId);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (e: DragEvent<HTMLElement>, catId: string) => {
+      e.preventDefault();
+      if (!draggedCatId || draggedCatId === catId) {
+        setDropTargetId(null);
+        setDropSide(null);
+        return;
+      }
+      const rect = e.currentTarget.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      setDropTargetId(catId);
+      setDropSide(e.clientX < midX ? "left" : "right");
+    },
+    [draggedCatId]
+  );
+
+  const handleDragLeave = useCallback(() => {
+    setDropTargetId(null);
+    setDropSide(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLElement>, targetCatId: string) => {
+      e.preventDefault();
+      if (!draggedCatId || draggedCatId === targetCatId) {
+        setDraggedCatId(null);
+        setDropTargetId(null);
+        setDropSide(null);
+        return;
+      }
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      const side = e.clientX < midX ? "left" : "right";
+
+      setOrderedCategories((prev) => {
+        const next = prev.filter((c) => c.id !== draggedCatId);
+        const dragged = prev.find((c) => c.id === draggedCatId)!;
+        const targetIndex = next.findIndex((c) => c.id === targetCatId);
+        const insertAt = side === "left" ? targetIndex : targetIndex + 1;
+        next.splice(insertAt, 0, dragged);
+        // Persist to server
+        fetch("/api/categories/reorder", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ orderedIds: next.map((c) => c.id) }),
+        });
+        return next;
+      });
+
+      setDraggedCatId(null);
+      setDropTargetId(null);
+      setDropSide(null);
+    },
+    [draggedCatId]
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedCatId(null);
+    setDropTargetId(null);
+    setDropSide(null);
+  }, []);
+
   // For keyboard shortcut "n" - open new task dialog for first category
-  const firstCategoryId = categories[0]?.id ?? null;
+  const firstCategoryId = orderedCategories[0]?.id ?? null;
 
   return (
     <>
@@ -159,11 +240,27 @@ export function DashboardClient({
                 </span>
               </TabsTrigger>
 
-              {categories.map((cat) => (
+              {orderedCategories.map((cat) => (
                 <TabsTrigger
                   key={cat.id}
                   value={cat.slug}
-                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 gap-1.5"
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, cat.id)}
+                  onDragOver={(e) => handleDragOver(e, cat.id)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, cat.id)}
+                  onDragEnd={handleDragEnd}
+                  className={`rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 gap-1.5 cursor-grab active:cursor-grabbing transition-all ${
+                    draggedCatId === cat.id ? "opacity-50" : ""
+                  } ${
+                    dropTargetId === cat.id && dropSide === "left"
+                      ? "border-l-2 !border-l-primary"
+                      : ""
+                  } ${
+                    dropTargetId === cat.id && dropSide === "right"
+                      ? "border-r-2 !border-r-primary"
+                      : ""
+                  }`}
                 >
                   <CategoryIcon
                     icon={cat.icon}
@@ -228,7 +325,7 @@ export function DashboardClient({
           )}
         </TabsContent>
 
-        {categories.map((cat) => {
+        {orderedCategories.map((cat) => {
           const catTasks = deserializeTasks(cat.tasks);
           return (
             <TabsContent key={cat.id} value={cat.slug} className="mt-0 p-6">
@@ -276,7 +373,7 @@ export function DashboardClient({
       {/* Decompose dialog */}
       {showDecompose && (
         <DecomposeDialog
-          categories={categories.map((c) => ({
+          categories={orderedCategories.map((c) => ({
             id: c.id,
             name: c.name,
             slug: c.slug,

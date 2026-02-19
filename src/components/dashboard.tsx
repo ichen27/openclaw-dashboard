@@ -3,7 +3,7 @@ import { DashboardClient } from "@/components/dashboard-client";
 
 export async function Dashboard() {
   const categories = await prisma.category.findMany({
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ order: "asc" }, { createdAt: "asc" }],
     include: {
       tasks: {
         where: { archived: false },
