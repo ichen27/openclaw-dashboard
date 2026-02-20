@@ -5,6 +5,56 @@ import { promisify } from "util";
 import { getAllAgents } from "@/lib/agents";
 
 const execAsync = promisify(exec);
+const VALID_TYPES = new Set(["post", "request", "status", "comment"]);
+
+type FeedPostInput = {
+  author: string;
+  content: string;
+  type: string;
+  parentId: string | null;
+  pinned: boolean;
+};
+
+function parseFeedPostBody(body: unknown):
+  | { ok: true; value: FeedPostInput }
+  | { ok: false; error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { ok: false, error: "Request body must be a JSON object" };
+  }
+
+  const { author, content, type, parentId, pinned } = body as Record<string, unknown>;
+
+  if (typeof author !== "string" || !author.trim()) {
+    return { ok: false, error: "Author is required" };
+  }
+
+  if (typeof content !== "string" || !content.trim()) {
+    return { ok: false, error: "Content is required" };
+  }
+
+  if (type !== undefined && typeof type !== "string") {
+    return { ok: false, error: "type must be a string" };
+  }
+
+  if (parentId !== undefined && parentId !== null && typeof parentId !== "string") {
+    return { ok: false, error: "parentId must be a string or null" };
+  }
+
+  if (pinned !== undefined && typeof pinned !== "boolean") {
+    return { ok: false, error: "pinned must be a boolean" };
+  }
+
+  return {
+    ok: true,
+    value: {
+      author: author.trim(),
+      content: content.trim(),
+      type: type && VALID_TYPES.has(type) ? type : "post",
+      parentId: parentId ?? null,
+      pinned: pinned ?? false,
+    },
+  };
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -53,20 +103,23 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  let body: unknown;
+
   try {
-    const body = await request.json();
-    const { author, content, type, parentId, pinned } = body;
+    body = await request.json();
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: "Invalid JSON body", detail }, { status: 400 });
+  }
 
-    if (!author?.trim()) {
-      return NextResponse.json({ error: "Author is required" }, { status: 400 });
-    }
-    if (!content?.trim()) {
-      return NextResponse.json({ error: "Content is required" }, { status: 400 });
-    }
+  const parsed = parseFeedPostBody(body);
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
+  }
 
-    const validTypes = ["post", "request", "status", "comment"];
-    const postType = type && validTypes.includes(type) ? type : "post";
+  const { author, content, type, parentId, pinned } = parsed.value;
 
+  try {
     // Parse @mentions from content
     const mentionRegex = /@(agent-[1-4]|ivan|main)/g;
     const mentionMatches = content.match(mentionRegex) ?? [];
@@ -74,27 +127,28 @@ export async function POST(request: NextRequest) {
 
     const post = await prisma.feedPost.create({
       data: {
-        author: author.trim(),
-        content: content.trim(),
-        type: postType,
+        author,
+        content,
+        type,
         mentions: JSON.stringify(mentions),
-        pinned: pinned ?? false,
-        parentId: parentId ?? null,
+        pinned,
+        parentId,
       },
     });
 
     // Fire notifications to mentioned agents (non-blocking)
     if (mentions.length > 0) {
-      const excerpt = content.trim().length > 100
-        ? content.trim().slice(0, 97) + "…"
-        : content.trim();
+      const excerpt = content.length > 100
+        ? content.slice(0, 97) + "…"
+        : content;
+
+      const agents = getAllAgents();
 
       for (const mentioned of mentions) {
         // Don't notify yourself
-        if (mentioned === author.trim()) continue;
+        if (mentioned === author) continue;
 
         try {
-          const agents = getAllAgents();
           const agent = agents.find((a) => a.id === mentioned);
           if (!agent || !agent.sessions.length) continue;
 
@@ -104,7 +158,7 @@ export async function POST(request: NextRequest) {
           const sessionKey = sorted[0]?.key;
           if (!sessionKey) continue;
 
-          const message = `📢 Feed mention from ${author.trim()}: "${excerpt}" — Check the dashboard feed at /feed`;
+          const message = `📢 Feed mention from ${author}: "${excerpt}" — Check the dashboard feed at /feed`;
           const safeMessage = message.replace(/"/g, '\\"').replace(/\n/g, " ");
           const command = `openclaw send --session "${sessionKey}" --message "${safeMessage}" --timeout 15`;
 
@@ -119,7 +173,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(post, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  } catch (err: unknown) {
+    console.error("Feed POST create error:", err);
+    const detail = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: "Failed to create feed post", detail }, { status: 500 });
   }
 }
